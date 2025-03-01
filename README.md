@@ -32,10 +32,10 @@ Specifically, it checks for the following conditions:
         -e BLOCK_LAG_20=20 \
         -e BLOCK_LAG_100=100 \
         --name alephzero-monitor \
-        YOUR_DOCKER_HUB_USERNAME/alephzero-monitor:latest
+        k3vmcd/alephzero-container-monitor:latest
     ```
 
-    Replace `your_container_name` with the actual name of the Aleph Zero container you want to monitor and `YOUR_DOCKER_HUB_USERNAME` with your dockerhub username.
+    Replace `your_container_name` with the actual name of the Aleph Zero container you want to monitor.
 
 ### Environment Variables
 
