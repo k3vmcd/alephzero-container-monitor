@@ -22,6 +22,8 @@ Specifically, it checks for the following conditions:
 * Verify your Docker group GID on the host and set MONITOR_GID:
   ```bash
   ls -ln /var/run/docker.sock
+  ```
+  - This shows the ownership of the Docker socket (e.g., srw-rw---- 1 0 996 ...). The second number (e.g., 996) is the GID of the docker group. Adjust MONITOR_GID if it differs from the default (996).
 
 ### Deployment
 
