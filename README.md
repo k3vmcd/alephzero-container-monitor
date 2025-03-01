@@ -31,6 +31,9 @@ Specifically, it checks for the following conditions:
         -e CHECK_INTERVAL=60 \
         -e BLOCK_LAG_20=20 \
         -e BLOCK_LAG_100=100 \
+        -e MONITOR_UID=1000 \
+        -e MONITOR_GID=1000 \
+        -v /var/run/docker.sock:/var/run/docker.sock \
         --name alephzero-monitor \
         k3vmcd/alephzero-container-monitor:latest
     ```
@@ -44,6 +47,17 @@ Specifically, it checks for the following conditions:
 * `CHECK_INTERVAL`: (Optional, default: `60`) The interval (in seconds) between checks.
 * `BLOCK_LAG_20`: (Optional, default: `20`) The block lag threshold for restarts when not in sync.
 * `BLOCK_LAG_100`: (Optional, default: `100`) The block lag threshold for immediate restarts.
+* `MONITOR_UID`: (Optional, default: `1000`) The User ID that the container will run as.
+* `MONITOR_GID`: (Optional, default: `1000`) The Group ID that the container will run as.
+
+### Security Considerations
+
+* **Docker Socket Mount:** The `-v /var/run/docker.sock:/var/run/docker.sock` option mounts the Docker socket into the container. This grants the container significant privileges, allowing it to control the Docker daemon.
+* **Security Risks:** Be aware that this approach introduces security risks. Any process running inside the `alephzero-monitor` container can potentially control the host system.
+* **Production Environments:** Exercise caution when using this approach in production environments. Consider alternative solutions if security is a primary concern.
+* **Restricted Access:** If possible, limit the privileges of the user running inside the container.
+* **User Configuration:** The container runs as a non-root user for improved security. The `MONITOR_UID` and `MONITOR_GID` environment variables can be used to configure the User ID and Group ID that the container will use.
+* **Docker Socket Permissions:** The user running the container (specified by `MONITOR_UID` and `MONITOR_GID`) must have read and write permissions to the Docker socket (`/var/run/docker.sock`). In most cases, this means the user needs to be a member of the `docker` group on the host system.
 
 ### Logging
 
