@@ -2,7 +2,7 @@
 
 # Get UID and GID from environment variables, or use defaults
 MON_UID=${MONITOR_UID:-1000}
-MON_GID=${MONITOR_GID:-1000}
+MON_GID=${MONITOR_GID:-996}
 
 # Create user and group if they don't exist
 if ! getent group "$MON_GID" > /dev/null 2>&1; then

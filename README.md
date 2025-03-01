@@ -19,6 +19,9 @@ Specifically, it checks for the following conditions:
 ### Prerequisites
 
 * Docker installed
+* Verify your Docker group GID on the host and set MONITOR_GID:
+  ```bash
+  ls -ln /var/run/docker.sock
 
 ### Deployment
 
@@ -27,18 +30,25 @@ Specifically, it checks for the following conditions:
     ```bash
     docker run -d \
         -e CONTAINER_NAME="your_container_name" \
-        -e RPC_URL="[https://aleph-zero.api.onfinality.io/public](https://aleph-zero.api.onfinality.io/public)" \
+        -e RPC_URL="https://aleph-zero.api.onfinality.io/public" \
         -e CHECK_INTERVAL=60 \
         -e BLOCK_LAG_20=20 \
         -e BLOCK_LAG_100=100 \
         -e MONITOR_UID=1000 \
-        -e MONITOR_GID=1000 \
+        -e MONITOR_GID=996 \
         -v /var/run/docker.sock:/var/run/docker.sock \
         --name alephzero-monitor \
         k3vmcd/alephzero-container-monitor:latest
     ```
 
-    Replace `your_container_name` with the actual name of the Aleph Zero container you want to monitor.
+    Replace `your_container_name` with the actual name of the Aleph Zero container you want to monitor. Adjust MONITOR_GID if your host’s docker GID differs from the default (996).
+
+    **Minimal Version Using Defaults**
+    docker run -d \
+    -e CONTAINER_NAME="your_container_name" \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    --name alephzero-monitor \
+    k3vmcd/alephzero-container-monitor:latest
 
 ### Environment Variables
 
@@ -48,7 +58,7 @@ Specifically, it checks for the following conditions:
 * `BLOCK_LAG_20`: (Optional, default: `20`) The block lag threshold for restarts when not in sync.
 * `BLOCK_LAG_100`: (Optional, default: `100`) The block lag threshold for immediate restarts.
 * `MONITOR_UID`: (Optional, default: `1000`) The User ID that the container will run as.
-* `MONITOR_GID`: (Optional, default: `1000`) The Group ID that the container will run as.
+* `MONITOR_GID`: (Optional, default: `996`) The Group ID that the container will run as.
 
 ### Security Considerations
 
@@ -57,13 +67,12 @@ Specifically, it checks for the following conditions:
 * **Production Environments:** Exercise caution when using this approach in production environments. Consider alternative solutions if security is a primary concern.
 * **Restricted Access:** If possible, limit the privileges of the user running inside the container.
 * **User Configuration:** The container runs as a non-root user for improved security. The `MONITOR_UID` and `MONITOR_GID` environment variables can be used to configure the User ID and Group ID that the container will use.
-* **Docker Socket Permissions:** The user running the container (specified by `MONITOR_UID` and `MONITOR_GID`) must have read and write permissions to the Docker socket (`/var/run/docker.sock`). In most cases, this means the user needs to be a member of the `docker` group on the host system.
+* **Docker Socket Permissions:** The user running the container (specified by `MONITOR_UID` and `MONITOR_GID`) must have read and write permissions to the Docker socket (`/var/run/docker.sock`). In most cases, this means the user needs to be a member of the `docker` group on the host system (default GID: 996 in this image).
 
 ### Logging
 
-The script logs to `monitor.log` inside the Docker container. You can mount a volume to persist the logs:
+The script logs to stdout, which can be viewed using:
 
 ```bash
-docker run -d \
-    -v /path/on/host/monitor.log:/app/monitor.log \
-    # ... other options
+    docker logs alephzero-monitor
+```
