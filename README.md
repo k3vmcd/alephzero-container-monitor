@@ -6,62 +6,61 @@ This project provides a Dockerized Python script to monitor an Aleph Zero contai
 This script interacts with your Docker daemon via the Docker socket, granting it significant control over your system. It can restart containers, potentially disrupt operations, and, if misconfigured, cause data loss, downtime, or security vulnerabilities. There are no guarantees of stability, safety, or correctness. Proceed with extreme caution, thoroughly test in a non-production environment, and understand the risks before deploying. The authors are not liable for any damage or issues arising from its use.
 
 
-Description
------------
+## Description
 
 This project provides a Dockerized Python script to monitor an Aleph Zero container and automatically restart it under specific conditions to maintain synchronization with the Aleph Zero network.
 
 The script monitors an Aleph Zero container and restarts it based on block lag, sync state, block production status, and sync progress trends, with the following logic:
 
-*   **Cooldown Period**: After a restart, the script enforces a 5-minute (300-second) cooldown period before considering another restart. This prevents rapid restart loops and gives the container time to stabilize and begin syncing. If the time since the last restart is less than 300 seconds, it skips all further checks and waits until the cooldown expires.
+*   **Cooldown Period**: After a restart, the script enforces a 5-minute (300-second) cooldown period before considering another restart. This prevents rapid restart loops and gives the container time to stabilize and begin syncing. If the time since the last restart is less than 300 seconds, it logs "Container {container\_name} was restarted {time\_since\_last\_restart}s ago. Waiting for 300s cooldown" and skips all further checks until the cooldown expires.
     
 
 *   **Block Lag Checks**:
     
-    *   **Severe Lag (>100 Blocks)**: If the container’s latest synced block is more than 100 blocks behind the latest block from the Aleph Zero network (retrieved via RPC), the script restarts the container immediately after the cooldown period, regardless of sync state or block production. This threshold is configurable via the BLOCK\_LAG\_100 environment variable (default: 100).
+    *   **Severe Lag (>100 Blocks)**: If the container’s latest synced block is more than 100 blocks behind the latest block from the Aleph Zero network (retrieved via RPC), it logs "Container {container\_name} is behind by {lag} blocks (>100). Restarting..." and restarts the container immediately after the cooldown period, regardless of sync state or block production. This threshold is configurable via the BLOCK\_LAG\_100 environment variable (default: 100).
         
     
-    *   **Moderate Lag (>20 Blocks)**: If the lag exceeds 20 blocks, the container is not in a major sync state, and it’s not producing blocks in the current session, it restarts after the cooldown period. This threshold is configurable via the BLOCK\_LAG\_20 environment variable (default: 20).
+    *   **Moderate Lag (>20 Blocks)**: If the lag exceeds 20 blocks, the container is not in a major sync state, and it’s not producing blocks in the current session, it logs "Container {container\_name} is behind by {lag} blocks (>20) and not syncing/producing. Restarting..." and restarts after the cooldown period. This threshold is configurable via the BLOCK\_LAG\_20 environment variable (default: 20).
         
     
 
-*   **Sync Stall Detection**: If the container makes no progress (no blocks synced since the last check) for at least 3 minutes (180 seconds) and is not producing blocks, it restarts after the cooldown period, even if in a major sync state. This ensures stalled syncing is addressed unless the container is actively contributing to the network.
+*   **Sync Stall Detection**: If the container makes no progress (no blocks synced since the last check) for at least 3 minutes (180 seconds), it logs "Container {container\_name} sync stalled for 180s (no progress)". However, a restart only occurs if the lag exceeds 100 blocks (BLOCK\_LAG\_100) and the container is not producing blocks, ensuring that a stall alone doesn’t trigger a restart when the container is caught up or within acceptable ranges.
     
 
-*   **Falling Behind Detection**: The script tracks lag over a 5-minute window (300 seconds, approximately 5 checks at 60-second intervals). If the average lag increases consistently over this period and the container is not producing blocks, it restarts after the cooldown period, even if in a major sync state. This prevents the container from falling further behind when syncing isn’t keeping pace.
+*   **Falling Behind Detection**: The script tracks lag over a 5-minute window (300 seconds, approximately 5 checks at 60-second intervals). If the average lag increases consistently over this period, it logs "Container {container\_name} falling behind (avg lag increase over 300s)". A restart is triggered only if the lag exceeds 100 blocks (BLOCK\_LAG\_100) and the container is not producing blocks, preventing restarts when the lag is minor or managed.
     
 
-*   **Major Sync State**: The script checks the container’s logs for "Switched to major sync state." and "No longer in major sync state." messages. It considers the container to be in a major sync state if there’s a "Switched" message without a subsequent "No longer" message (or if the last "Switched" is more recent). Normally, this skips restarts unless stalled or falling behind conditions are met.
+*   **Major Sync State**: The script checks the container’s logs for "Switched to major sync state." and "No longer in major sync state." messages. It considers the container to be in a major sync state if there’s a "Switched" message without a subsequent "No longer" message (or if the last "Switched" is more recent). It logs "Container is in a major sync state." or "Container is not in a major sync state." accordingly. Normally, being in a major sync state skips restarts unless the lag exceeds 100 blocks, in which case it proceeds regardless of sync state.
     
 
-*   **Block Production**: For moderate lag (>20 blocks), stall (3 minutes), or falling behind (5 minutes) scenarios, the script checks if the container is producing blocks by looking for "Prepared block for proposing" and "Pre-sealed block for proposal" messages in the logs since the current session began. If producing blocks, no restart occurs for these conditions, assuming it’s functioning correctly despite lag or lack of sync progress.
+*   **Block Production**: For moderate lag (>20 blocks), stall (3 minutes), or falling behind (5 minutes) scenarios, the script checks if the container is producing blocks by looking for "Prepared block for proposing" and "Pre-sealed block for proposal" messages in the logs since the current session began. It logs "Container is producing blocks." or "Container is not producing blocks." If producing blocks, no restart occurs for these conditions (except severe lag >100 blocks), assuming it’s functioning correctly despite lag or lack of sync progress.
     
 
-*   **Session Tracking**: The script retrieves the current session number from logs (via "Running session ") to ensure block production checks are relevant to the latest operational context.
+*   **Session Tracking**: The script retrieves the current session number from logs (via "Running session ") and logs "Current session retrieved: {current\_session}" to ensure block production checks are relevant to the latest operational context.
     
 
 *   **Sync Metrics Logging**: Each check logs:
     
-    *   Current lag (difference between network best block and synced block).
+    *   Current lag (difference between network best block and synced block): "Container {container\_name} - Lag: {lag} blocks".
         
     
-    *   Blocks caught up since the last check.
+    *   Blocks caught up since the last check: "Caught up: {caught\_up} blocks".
         
     
-    *   Estimated sync rate (blocks per second).
+    *   Estimated sync rate: "Sync rate: {sync\_rate:.2f} blocks/s".
         
     
-    *   Estimated time to catch up (in seconds).
+    *   Estimated time to catch up: "ETA to catch up: {time\_to\_catch\_up:.0f}s".
         
     
-    *   If fully synced (lag = 0), a message indicating the container is caught up.
+    *   If fully synced (lag = 0), it logs "Container {container\_name} is fully caught up at block #{latest\_synced\_block}".
         
     
 
-*   **Latest Block Retrieval**: The latest network block number is fetched from the Aleph Zero network using the OnFinality public RPC endpoint (chain\_getHeader method), configurable via the RPC\_URL environment variable.
+*   **Latest Block Retrieval**: The latest network block number is fetched from the Aleph Zero network using the OnFinality public RPC endpoint (chain\_getHeader method), configurable via the RPC\_URL environment variable. It logs "Latest RPC block retrieved: {block\_number}".
     
 
-The script runs continuously, checking conditions every 60 seconds (configurable via CHECK\_INTERVAL), and uses the last 5000 log lines for most checks to balance performance and accuracy.
+The script runs continuously, checking conditions every 60 seconds (configurable via CHECK\_INTERVAL), and uses the last 5000 log lines for most checks to balance performance and accuracy. Detailed logs include fetch counts ("Fetched {lines} lines from docker logs") and session retrievals for transparency.
 
 
 ## Usage

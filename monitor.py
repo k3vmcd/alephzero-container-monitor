@@ -223,20 +223,17 @@ def monitor_container(container_name, rpc_url):
 
     is_producing_blocks = check_block_production(container_name, current_session)
 
-    # Stall detection: no progress for 3 minutes
-    stalled = check_stall(current_time, caught_up) if not is_producing_blocks else False
-    falling_behind = is_falling_behind() if not is_producing_blocks else False
+    # Stall detection: no progress for 3 minutes, only restart if lag > BLOCK_LAG_100
+    stalled = check_stall(current_time, caught_up) and lag > BLOCK_LAG_100 and not is_producing_blocks
+    falling_behind = is_falling_behind() and lag > BLOCK_LAG_100 and not is_producing_blocks
 
-    # Restart for severe lag, or stall/falling behind if not producing blocks
-    if lag > BLOCK_LAG_100 or (not is_producing_blocks and (stalled or falling_behind)):
+    # Restart for severe lag, or stall/falling behind if lag > BLOCK_LAG_100 and not producing
+    if lag > BLOCK_LAG_100:
         if stalled:
             logging.info(f"Container {container_name} sync stalled for {STALL_DURATION}s (no progress).")
         if falling_behind:
             logging.info(f"Container {container_name} falling behind (avg lag increase over {TREND_WINDOW}s).")
-        if lag > BLOCK_LAG_100:
-            logging.info(f"Container {container_name} is behind by {lag} blocks (>100). Restarting...")
-        else:
-            logging.info(f"Restarting container {container_name}...")
+        logging.info(f"Container {container_name} is behind by {lag} blocks (>100). Restarting...")
         try:
             subprocess.run(["docker", "restart", container_name], check=True)
             last_restart_time = current_time
@@ -247,7 +244,7 @@ def monitor_container(container_name, rpc_url):
             logging.error(f"Error restarting container: {e}")
             return
 
-    # Normal checks only if not stalled or falling behind
+    # Normal checks only if not severely lagging
     if is_in_major_sync:
         logging.info(f"Container {container_name} is in major sync state. Skipping restart.")
         return
