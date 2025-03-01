@@ -86,7 +86,11 @@ def check_major_sync_state(container_name):
             text=True,
             stderr=subprocess.STDOUT
         )
-        if "Switched to major sync state." in logs and "No longer in major sync state." not in logs:
+        sync_starts = [line for line in logs.splitlines() if "Switched to major sync state." in line]
+        sync_ends = [line for line in logs.splitlines() if "No longer in major sync state." in line]
+        
+        # If there are sync starts and no subsequent sync ends, assume in major sync
+        if sync_starts and (not sync_ends or sync_starts[-1] > sync_ends[-1] if sync_ends else True):
             logging.info("Container is in a major sync state.")
             return True
         else:
@@ -100,14 +104,12 @@ def was_recently_restarted(container_name):
     """Checks if the container was restarted within the last 5 minutes."""
     try:
         logs = subprocess.check_output(
-            ["docker", "logs", "--tail", "5000", container_name],
+            ["docker", "logs", "--since", "5m", container_name],
             text=True,
             stderr=subprocess.STDOUT
         )
         if "Aleph Node" in logs:
-            # Assume restart if startup message is in last 5000 lines
-            # Could refine with timestamp parsing if logs include time
-            logging.info("Container was recently restarted.")
+            logging.info("Container was recently restarted within 5 minutes.")
             return True
         return False
     except subprocess.CalledProcessError as e:
@@ -156,6 +158,14 @@ def monitor_container(container_name, rpc_url):
     """Monitors the container and restarts it if necessary."""
     global last_restart_time
 
+    current_time = time.time()
+    time_since_last_restart = current_time - last_restart_time
+
+    # Enforce cooldown period regardless of sync state
+    if time_since_last_restart < COOLDOWN_PERIOD:
+        logging.info(f"Container {container_name} was restarted {time_since_last_restart:.0f}s ago. Waiting for {COOLDOWN_PERIOD}s cooldown.")
+        return
+
     latest_rpc_block = get_latest_block_from_rpc(rpc_url)
     if latest_rpc_block is None:
         logging.error("Latest RPC block not retrieved.")
@@ -167,24 +177,19 @@ def monitor_container(container_name, rpc_url):
         return
 
     block_lag = latest_rpc_block - latest_synced_block
-    current_time = time.time()
 
     # Check if container is in major sync state
     is_in_major_sync = check_major_sync_state(container_name)
-
-    # Check if recently restarted
-    recently_restarted = was_recently_restarted(container_name)
-    time_since_last_restart = current_time - last_restart_time
-
-    # If in major sync or within cooldown period, skip restart
     if is_in_major_sync:
         logging.info(f"Container {container_name} is in major sync state. Skipping restart.")
         return
-    if recently_restarted and time_since_last_restart < COOLDOWN_PERIOD:
-        logging.info(f"Container {container_name} was restarted {time_since_last_restart:.0f}s ago. Waiting for cooldown or sync exit.")
-        return
 
-    # Immediate restart if lag > 100 blocks and not in cooldown/sync
+    # Check if recently restarted (redundant with cooldown but kept for logging)
+    recently_restarted = was_recently_restarted(container_name)
+    if recently_restarted:
+        logging.info(f"Container {container_name} was recently restarted (post-cooldown check).")
+
+    # Immediate restart if lag > 100 blocks and not in sync
     if block_lag > BLOCK_LAG_100:
         logging.info(f"Container {container_name} is behind by {block_lag} blocks (>100). Restarting...")
         try:
@@ -208,7 +213,7 @@ def monitor_container(container_name, rpc_url):
     else:
         logging.info("Container is not producing blocks.")
 
-    # Restart if lag > 20 blocks, not producing, and not in cooldown/sync
+    # Restart if lag > 20 blocks, not producing, and not in sync
     if block_lag > BLOCK_LAG_20:
         logging.info(f"Container {container_name} is behind by {block_lag} blocks (>20) and not syncing/producing. Restarting...")
         try:
