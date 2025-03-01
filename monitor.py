@@ -50,6 +50,7 @@ def get_latest_block_from_rpc(rpc_url):
         result = response.json().get('result')
         if result and 'number' in result:
             block_number = int(result['number'], 16)
+            logging.info(f"Latest RPC block retrieved: {block_number}")
             return block_number
         else:
             logging.error("Could not retrieve block number from RPC response.")
@@ -68,9 +69,11 @@ def get_latest_synced_block(container_name):
             text=True,
             stderr=subprocess.STDOUT
         )
+        logging.info(f"Fetched {len(logs.splitlines())} lines from docker logs")
         synced_blocks = re.findall(r"Imported #(\d+) \(0x", logs)
         if synced_blocks:
             latest_synced_block = int(synced_blocks[-1])
+            logging.info(f"Latest synced block retrieved: {latest_synced_block}")
             return latest_synced_block
         else:
             logging.error(f"Could not retrieve latest synced block. Log sample: {logs[-500:]}")
@@ -89,8 +92,11 @@ def check_major_sync_state(container_name):
         sync_starts = [line for line in logs.splitlines() if "Switched to major sync state." in line]
         sync_ends = [line for line in logs.splitlines() if "No longer in major sync state." in line]
         if sync_starts and (not sync_ends or sync_starts[-1] > sync_ends[-1]):
+            logging.info("Container is in a major sync state.")
             return True
-        return False
+        else:
+            logging.info("Container is not in a major sync state.")
+            return False
     except subprocess.CalledProcessError as e:
         logging.error(f"Error getting Docker logs: {e}")
         return False
@@ -102,7 +108,10 @@ def was_recently_restarted(container_name):
             text=True,
             stderr=subprocess.STDOUT
         )
-        return "Aleph Node" in logs
+        if "Aleph Node" in logs:
+            logging.info("Container was recently restarted within 5 minutes.")
+            return True
+        return False
     except subprocess.CalledProcessError as e:
         logging.error(f"Error checking restart status: {e}")
         return False
@@ -114,7 +123,12 @@ def check_block_production(container_name, current_session):
             text=True,
             stderr=subprocess.STDOUT
         )
-        return "Prepared block for proposing" in logs and "Pre-sealed block for proposal" in logs
+        if "Prepared block for proposing" in logs and "Pre-sealed block for proposal" in logs:
+            logging.info("Container is producing blocks.")
+            return True
+        else:
+            logging.info("Container is not producing blocks.")
+            return False
     except subprocess.CalledProcessError as e:
         logging.error(f"Error getting Docker logs: {e}")
         return False
@@ -127,7 +141,13 @@ def get_current_session(container_name):
             stderr=subprocess.STDOUT
         )
         sessions = re.findall(r"Running session (\d+)", logs)
-        return sessions[-1] if sessions else None
+        if sessions:
+            current_session = sessions[-1]
+            logging.info(f"Current session retrieved: {current_session}")
+            return current_session
+        else:
+            logging.error("Could not retrieve current session from Docker logs.")
+            return None
     except subprocess.CalledProcessError as e:
         logging.error(f"Error getting Docker logs: {e}")
         return None
@@ -193,9 +213,6 @@ def monitor_container(container_name, rpc_url):
         logging.info(f"Container {container_name} - Lag: {lag} blocks, Caught up: {caught_up} blocks, Sync rate: {sync_rate:.2f} blocks/s, ETA to catch up: {time_to_catch_up:.0f}s")
 
     is_in_major_sync = check_major_sync_state(container_name)
-    if is_in_major_sync:
-        logging.info(f"Container {container_name} is in major sync state.")
-
     recently_restarted = was_recently_restarted(container_name)
     if recently_restarted:
         logging.info(f"Container {container_name} was recently restarted (post-cooldown check).")
@@ -205,10 +222,6 @@ def monitor_container(container_name, rpc_url):
         return
 
     is_producing_blocks = check_block_production(container_name, current_session)
-    if is_producing_blocks:
-        logging.info("Container is producing blocks.")
-    else:
-        logging.info("Container is not producing blocks.")
 
     # Stall detection: no progress for 3 minutes
     stalled = check_stall(current_time, caught_up) if not is_producing_blocks else False
@@ -221,8 +234,9 @@ def monitor_container(container_name, rpc_url):
         if falling_behind:
             logging.info(f"Container {container_name} falling behind (avg lag increase over {TREND_WINDOW}s).")
         if lag > BLOCK_LAG_100:
-            logging.info(f"Container {container_name} is behind by {lag} blocks (>100).")
-        logging.info("Restarting...")
+            logging.info(f"Container {container_name} is behind by {lag} blocks (>100). Restarting...")
+        else:
+            logging.info(f"Restarting container {container_name}...")
         try:
             subprocess.run(["docker", "restart", container_name], check=True)
             last_restart_time = current_time
@@ -235,14 +249,14 @@ def monitor_container(container_name, rpc_url):
 
     # Normal checks only if not stalled or falling behind
     if is_in_major_sync:
-        logging.info(f"Container {container_name} is in major sync state. Skipping normal restart checks.")
+        logging.info(f"Container {container_name} is in major sync state. Skipping restart.")
         return
 
     if is_producing_blocks:
         return  # No further checks if producing blocks
 
     if lag > BLOCK_LAG_20:
-        logging.info(f"Container {container_name} is behind by {lag} blocks (>20) and not producing. Restarting...")
+        logging.info(f"Container {container_name} is behind by {lag} blocks (>20) and not syncing/producing. Restarting...")
         try:
             subprocess.run(["docker", "restart", container_name], check=True)
             last_restart_time = current_time
