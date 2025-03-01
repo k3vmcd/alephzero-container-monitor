@@ -1,0 +1,149 @@
+import subprocess
+import re
+import time
+import os
+import logging
+import signal
+import sys
+import requests
+import json
+
+# Configuration via environment variables
+CONTAINER_NAME = os.environ.get("CONTAINER_NAME")
+RPC_URL = os.environ.get("RPC_URL", "https://aleph-zero.api.onfinality.io/public")
+CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", 60))
+BLOCK_LAG_20 = int(os.environ.get("BLOCK_LAG_20", 20))
+BLOCK_LAG_100 = int(os.environ.get("BLOCK_LAG_100", 100))
+
+# Logging setup
+logging.basicConfig(filename="monitor.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Signal handling
+def signal_handler(sig, frame):
+    logging.info("Graceful shutdown initiated.")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
+def get_latest_block_from_rpc(rpc_url):
+    """Fetches the latest block number using chain_getHeader."""
+    try:
+        payload = {"id": 1, "jsonrpc": "2.0", "method": "chain_getHeader"}
+        headers = {'Content-Type': 'application/json'}
+        response = requests.post(rpc_url, json=payload, headers=headers)
+        response.raise_for_status()
+        result = response.json().get('result')
+        if result and 'number' in result:
+            block_number = int(result['number'], 16)
+            return block_number
+        else:
+            logging.error("Could not retrieve block number from RPC response.")
+            return None
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error fetching latest block from RPC: {e}")
+        return None
+    except (KeyError, ValueError, AttributeError) as e:
+        logging.error(f"Error parsing RPC response: {e}")
+        return None
+
+def get_latest_synced_block(container_name):
+    """Extracts the latest synced block number from Docker logs."""
+    try:
+        logs = subprocess.check_output(
+            ["docker", "logs", "--tail", "5000", container_name], text=True
+        )
+        synced_blocks = re.findall(r"Imported #(\d+) \(0x", logs)
+        if synced_blocks:
+            return int(synced_blocks[-1])
+        else:
+            return None
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error getting Docker logs: {e}")
+        return None
+    except ValueError:
+        return None
+
+def check_major_sync_state(container_name):
+    """Checks if the container is in a major sync state."""
+    try:
+        logs = subprocess.check_output(
+            ["docker", "logs", "--tail", "5000", container_name], text=True
+        )
+        return "No longer in major sync state." in logs
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error getting Docker logs: {e}")
+        return False
+
+def check_block_production(container_name, current_session):
+    """Checks if the container is producing blocks during the current session."""
+    try:
+        logs = subprocess.check_output(
+            ["docker", "logs", "--since", f"{current_session}", container_name], text=True
+        )
+        return "Prepared block for proposing" in logs and "Pre-sealed block for proposal" in logs
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error getting Docker logs: {e}")
+        return False
+
+def get_current_session(container_name):
+    """Gets the current session from the docker logs."""
+    try:
+        logs = subprocess.check_output(
+            ["docker", "logs", "--tail", "1000", container_name], text=True
+        )
+        sessions = re.findall(r"Running session (\d+)", logs)
+        if sessions:
+            return sessions[-1]
+        else:
+            return None
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error getting Docker logs: {e}")
+        return None
+
+def monitor_container(container_name, rpc_url):
+    """Monitors the container and restarts it if necessary."""
+    latest_rpc_block = get_latest_block_from_rpc(rpc_url)
+    if latest_rpc_block is None:
+        return
+
+    latest_synced_block = get_latest_synced_block(container_name)
+    if latest_synced_block is None:
+        return
+
+    block_lag = latest_rpc_block - latest_synced_block
+
+    if block_lag > BLOCK_LAG_100:
+        logging.info(f"Container {container_name} is behind by more than 100 blocks. Restarting...")
+        try:
+            subprocess.run(["docker", "restart", container_name], check=True)
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Error restarting container: {e}")
+        return
+
+    is_not_syncing = check_major_sync_state(container_name)
+    if is_not_syncing is False:
+        return
+
+    current_session = get_current_session(container_name)
+    if current_session is None:
+        return
+
+    is_producing_blocks = check_block_production(container_name, current_session)
+    if is_producing_blocks is True:
+        return
+
+    if block_lag > BLOCK_LAG_20:
+        logging.info(f"Container {container_name} is behind by more than 20 blocks and not syncing. Restarting...")
+        try:
+            subprocess.run(["docker", "restart", container_name], check=True)
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Error restarting container: {e}")
+
+if __name__ == "__main__":
+    while True:
+        if not CONTAINER_NAME:
+            logging.error("CONTAINER_NAME environment variable is not set. Exiting.")
+            sys.exit(1)
+        monitor_container(CONTAINER_NAME, RPC_URL)
+        time.sleep(CHECK_INTERVAL)
