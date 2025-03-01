@@ -15,8 +15,12 @@ CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", 60))
 BLOCK_LAG_20 = int(os.environ.get("BLOCK_LAG_20", 20))
 BLOCK_LAG_100 = int(os.environ.get("BLOCK_LAG_100", 100))
 
-# Logging setup
-logging.basicConfig(filename="monitor.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# Logging setup - Output to stdout
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    stream=sys.stdout  # Send logs to stdout for Docker to capture
+)
 
 # Signal handling
 def signal_handler(sig, frame):
@@ -172,4 +176,4 @@ if __name__ == "__main__":
             sys.exit(1)
         monitor_container(CONTAINER_NAME, RPC_URL)
         time.sleep(CHECK_INTERVAL)
-    logging.info("Stopping container monitor.")
+#    logging.info("Stopping container monitor.")  # Note: Unreachable due to infinite loop
