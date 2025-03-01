@@ -2,17 +2,32 @@
 
 This project provides a Dockerized Python script to monitor an Aleph Zero container and automatically restart it under specific conditions.
 
+⚠️ **DIRE WARNING: USE AT YOUR OWN RISK** ⚠️  
+This script interacts with your Docker daemon via the Docker socket, granting it significant control over your system. It can restart containers, potentially disrupt operations, and, if misconfigured, cause data loss, downtime, or security vulnerabilities. There are no guarantees of stability, safety, or correctness. Proceed with extreme caution, thoroughly test in a non-production environment, and understand the risks before deploying. The authors are not liable for any damage or issues arising from its use.
+
+
 ## Description
 
-The script monitors an Aleph Zero container and restarts it when it falls far behind the highest known block or if it exits a major sync state and hasn't caught up yet, but isn't in the middle of (at least attempting) to produce blocks.
+This project provides a Dockerized Python script to monitor an Aleph Zero container and automatically restart it under specific conditions to maintain synchronization with the Aleph Zero network.
 
-Specifically, it checks for the following conditions:
+The script monitors an Aleph Zero container and restarts it based on block lag, sync state, and block production status, with the following logic:
 
-* **Block Lag:** If the container's synced block is more than 100 blocks behind the latest block from the Aleph Zero network, it restarts the container immediately.
-* **Sync State and Block Lag:** If the container is not in a major sync state (indicated by the presence of the log message "No longer in major sync state."), the synced block is more than 20 blocks behind the latest block, and the container is not actively producing blocks in the current session, it restarts the container.
-* **Block Production:** Block production is determined by the existence of log lines indicating that the container is preparing and pre-sealing blocks.
-* **Session Tracking:** The script tracks the current session to ensure block production checks are relevant.
-* **Latest Block Retrieval:** The script retrieves the latest block number from the Aleph Zero network using the OnFinality public RPC endpoint.
+- **Cooldown Period**: After a restart, the script enforces a 5-minute (300-second) cooldown period before considering another restart. This prevents rapid restart loops and gives the container time to stabilize and begin syncing. If the time since the last restart is less than 300 seconds, it skips all further checks and waits until the cooldown expires.
+
+- **Block Lag Checks**:
+  - **Severe Lag (>100 Blocks)**: If the container’s latest synced block is more than 100 blocks behind the latest block from the Aleph Zero network (retrieved via RPC), and it’s not in a major sync state, the script restarts the container immediately after the cooldown period. This threshold is configurable via the `BLOCK_LAG_100` environment variable (default: 100).
+  - **Moderate Lag (>20 Blocks)**: If the lag exceeds 20 blocks, the container is not in a major sync state, and it’s not producing blocks in the current session, it restarts after the cooldown period. This threshold is configurable via the `BLOCK_LAG_20` environment variable (default: 20).
+
+- **Major Sync State**: The script checks the container’s logs for "Switched to major sync state." and "No longer in major sync state." messages. It considers the container to be in a major sync state if there’s a "Switched" message without a subsequent "No longer" message (or if the last "Switched" is more recent). If in this state, it skips restarting, allowing the container to complete its sync process.
+
+- **Block Production**: For moderate lag scenarios (>20 blocks), the script checks if the container is producing blocks by looking for "Prepared block for proposing" and "Pre-sealed block for proposal" messages in the logs since the current session began. If it’s producing blocks, no restart occurs, assuming it’s functioning correctly despite the lag.
+
+- **Session Tracking**: The script retrieves the current session number from logs (via "Running session <number>") to ensure block production checks are relevant to the latest operational context.
+
+- **Latest Block Retrieval**: The latest network block number is fetched from the Aleph Zero network using the OnFinality public RPC endpoint (`chain_getHeader` method), configurable via the `RPC_URL` environment variable.
+
+The script runs continuously, checking conditions every 60 seconds (configurable via `CHECK_INTERVAL`), and uses the last 5000 log lines for most checks to balance performance and accuracy.
+
 
 ## Usage
 
