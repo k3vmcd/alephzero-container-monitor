@@ -53,18 +53,20 @@ def get_latest_block_from_rpc(rpc_url):
         return None
 
 def get_latest_synced_block(container_name):
-    """Extracts the latest synced block number from Docker logs."""
     try:
         logs = subprocess.check_output(
-            ["docker", "logs", "--tail", "5000", container_name], text=True
+            ["docker", "logs", "--tail", "5000", container_name],
+            text=True,
+            stderr=subprocess.STDOUT
         )
+        logging.info(f"Fetched {len(logs.splitlines())} lines from docker logs")
         synced_blocks = re.findall(r"Imported #(\d+) \(0x", logs)
         if synced_blocks:
             latest_synced_block = int(synced_blocks[-1])
             logging.info(f"Latest synced block retrieved: {latest_synced_block}")
             return latest_synced_block
         else:
-            logging.error("Could not retrieve latest synced block from Docker logs.")
+            logging.error(f"Could not retrieve latest synced block. Log sample: {logs[-500:]}")
             return None
     except subprocess.CalledProcessError as e:
         logging.error(f"Error getting Docker logs: {e}")
