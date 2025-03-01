@@ -46,11 +46,13 @@ Specifically, it checks for the following conditions:
     Replace `your_container_name` with the actual name of the Aleph Zero container you want to monitor. Adjust MONITOR_GID if your host’s docker GID differs from the default (996).
 
     **Minimal Version Using Defaults**
+    ```bash
     docker run -d \
-    -e CONTAINER_NAME="your_container_name" \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    --name alephzero-monitor \
-    k3vmcd/alephzero-container-monitor:latest
+        -e CONTAINER_NAME="your_container_name" \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        --name alephzero-monitor \
+        k3vmcd/alephzero-container-monitor:latest
+    ```
 
 ### Environment Variables
 
