@@ -6,11 +6,11 @@ GID=${MONITOR_GID:-1000}
 
 # Create user and group if they don't exist
 if ! getent group "$GID" > /dev/null 2>&1; then
-  addgroup -g "$GID" monitorgroup
+  groupadd -g "$GID" monitorgroup
 fi
 
 if ! getent passwd "$UID" > /dev/null 2>&1; then
-  adduser -u "$UID" -G monitorgroup -D monitoruser
+  useradd -u "$UID" -g "$GID" -M --no-create-home --shell /bin/false monitoruser
 fi
 
 # Change ownership of /app directory
