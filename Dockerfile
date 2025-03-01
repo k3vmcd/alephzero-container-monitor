@@ -1,7 +1,6 @@
-FROM python:3.9-slim-buster
+FROM debian:bookworm-slim
 WORKDIR /app
-RUN echo "deb http://deb.debian.org/debian buster-backports main" >> /etc/apt/sources.list
-RUN apt-get update && apt-get install -y su-exec -t buster-backports
+RUN apt-get update && apt-get install -y su-exec
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY monitor.py .
