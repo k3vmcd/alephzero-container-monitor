@@ -17,4 +17,4 @@ fi
 chown -R "$UID":"$GID" /app
 
 # Switch to the specified user and run the application
-exec su-exec "$UID":"$GID" python monitor.py
+exec gosu "$UID":"$GID" python monitor.py
